@@ -1,0 +1,9 @@
+{
+  "name": "loom",
+  "version": "0.1.0",
+  "description": "Obsidian-backed graph retrieval memory for Claude Code",
+  "author": "chirantansoni",
+  "license": "MIT",
+  "homepage": "https://github.com/chirantansoni/loom",
+  "install": "scripts/install.sh"
+}

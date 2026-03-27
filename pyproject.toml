@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "loom-claude"
+version = "0.1.0"
+description = "Obsidian-backed graph retrieval memory for Claude Code"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+keywords = ["claude", "mcp", "obsidian", "memory", "rag", "knowledge-graph"]
+
+dependencies = [
+    "typer>=0.12",
+    "httpx>=0.27",
+    "mcp>=1.0",
+    "pinecone>=5.0",
+    "anthropic>=0.40",
+    "rich>=13.0",
+    "obsidian-mcp",
+]
+
+[tool.uv.sources]
+obsidian-mcp = { path = "obsidian-mcp" }
+
+[project.scripts]
+loom = "loom.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/chirantansoni/loom"
+Issues = "https://github.com/chirantansoni/loom/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["loom"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
