@@ -140,3 +140,26 @@ class ChromaStore:
         if not ids:
             return
         self._collection.delete(ids=ids)
+
+    def get_embeddings_by_ids(self, ids: list[str]) -> list[list[float]]:
+        """Retrieve stored embedding vectors by chunk ID.
+
+        Used during incremental indexing to fetch embeddings for unchanged
+        chunks when computing the note-level mean-pooled vector.
+
+        Args:
+            ids: List of chunk IDs to look up.
+
+        Returns:
+            List of embedding vectors in the same order as the input IDs.
+            Missing IDs are silently omitted — callers must handle shorter results.
+        """
+        if not ids:
+            return []
+
+        response = self._collection.get(ids=ids, include=["embeddings"])
+        raw = response.get("embeddings") or []
+
+        # ChromaDB returns embeddings in the same order as the requested IDs
+        # when all IDs are found; return as plain Python lists.
+        return [list(vec) for vec in raw]

@@ -474,3 +474,98 @@ def compress_cmd(
 
     from loom.vault import VaultClient
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# loom find-links
+# ---------------------------------------------------------------------------
+
+
+@app.command("find-links")
+def find_links_cmd() -> None:
+    """Scan note embeddings and queue semantically similar pairs for review.
+
+    Compares all indexed note embeddings pairwise and inserts candidates into
+    the pending_links queue.  Run ``loom review-links`` to approve or reject
+    them in the browser UI.
+
+    Requires ``loom reindex`` to have been run first so that
+    note-level embeddings exist in the database.
+    """
+    try:
+        config = load_config()
+    except LoomConfigNotFoundError as e:
+        rprint(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1) from None
+
+    if not config.semantic_links_enabled:
+        rprint("[yellow]Semantic links are disabled.[/yellow]")
+        rprint("Enable: loom config set semantic_links_enabled true")
+        raise typer.Exit(code=0)
+
+    from loom.db import get_connection
+    from loom.retrieval.semantic_links import discover_links
+
+    rprint("[bold]Scanning note embeddings for related pairs…[/bold]")
+    db = get_connection()
+    try:
+        count = discover_links(
+            db,
+            threshold=config.semantic_links_threshold,
+            max_per_note=config.semantic_links_max_per_note,
+        )
+    finally:
+        db.close()
+
+    if count == 0:
+        rprint("[yellow]No new link candidates found.[/yellow]")
+        rprint("  Tip: Run 'loom reindex' first to build note embeddings.")
+    else:
+        rprint(f"[green]✓[/green] {count} new candidate(s) queued.")
+        rprint("  Review them with: [bold]loom review-links[/bold]")
+
+
+# ---------------------------------------------------------------------------
+# loom review-links
+# ---------------------------------------------------------------------------
+
+
+@app.command("review-links")
+def review_links_cmd(
+    port: int = typer.Option(7842, "--port", "-p", help="Local port to listen on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open browser automatically"),
+) -> None:
+    """Start the local link review UI in the browser.
+
+    Serves a single-page app at http://localhost:<port>/ where you can
+    approve or reject semantic link suggestions discovered by ``loom find-links``.
+    Approved links are written as Obsidian [[wikilinks]] in the source note.
+
+    Press Ctrl+C to stop the server.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        rprint("[bold red]Error:[/] uvicorn is required to run the review UI.")
+        rprint("Install it: uv add uvicorn")
+        raise typer.Exit(code=1) from None
+
+    try:
+        config = load_config()
+    except LoomConfigNotFoundError as e:
+        rprint(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1) from None
+
+    from loom.ui.server import create_app
+
+    url = f"http://{host}:{port}"
+    rprint(f"[bold]Loom Link Review[/bold] → {url}")
+
+    if not no_browser:
+        import threading
+        import webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    fastapi_app = create_app(config)
+    uvicorn.run(fastapi_app, host=host, port=port, log_level="warning")

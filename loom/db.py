@@ -36,6 +36,39 @@ CREATE TABLE IF NOT EXISTS pending_events (
     tool_response TEXT NOT NULL,
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Per-chunk tracking: stable content-addressed IDs allow skipping unchanged
+-- chunks during incremental reindex without re-embedding the whole note.
+CREATE TABLE IF NOT EXISTS chunk_state (
+    chunk_id   TEXT PRIMARY KEY,
+    note_path  TEXT NOT NULL,
+    chunk_hash TEXT NOT NULL,
+    indexed_at TIMESTAMP NOT NULL
+);
+
+-- Mean-pooled representative embedding per note (average of chunk vectors).
+-- Stored as a raw BLOB of IEEE 754 doubles for fast pairwise similarity in
+-- the semantic link discovery engine.
+CREATE TABLE IF NOT EXISTS note_embeddings (
+    note_path  TEXT PRIMARY KEY,
+    embedding  BLOB NOT NULL,
+    indexed_at TIMESTAMP NOT NULL
+);
+
+-- Pending semantic link suggestions awaiting user review.
+-- source_path and target_path are vault-relative note paths.
+-- status: 'pending' | 'approved' | 'rejected'
+CREATE TABLE IF NOT EXISTS pending_links (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_path    TEXT NOT NULL,
+    target_path    TEXT NOT NULL,
+    similarity     REAL NOT NULL,
+    source_excerpt TEXT,
+    target_excerpt TEXT,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    created_at     TIMESTAMP NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_path, target_path)
+);
 """
 
 

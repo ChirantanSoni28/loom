@@ -26,9 +26,10 @@
 | Vector store | ChromaDB (local) | >=0.5 |
 | Embeddings | Ollama (local) | hard dependency |
 | Default model | `nomic-embed-text` | 768-dim |
-| LLM compression | `anthropic` SDK | >=0.40 |
-| Compression model | `claude-haiku-4-5` | — |
+| LLM compression | Ollama (default) or `anthropic` SDK (optional) | — / >=0.40 |
+| Default compression model | `llama3.2` (Ollama) | configurable |
 | Graph cache | SQLite (stdlib) | — |
+| Link review UI | `fastapi` + `uvicorn` | >=0.111 / >=0.29 |
 | Vault access | Obsidian CLI (`obsidian-mcp` package) | subprocess |
 | Config | JSON (`~/.loom/loom-settings.json`) | — |
 | Package manager | `uv` (preferred) or `pip` | — |
@@ -77,12 +78,21 @@ uv run ruff check loom/
 loom/
   loom/                    <- Python package
     __main__.py            <- entry point (`python -m loom`)
-    cli.py                 <- Typer CLI
-    config.py              <- loom-settings.json loader
-    db.py                  <- SQLite schema + connection
+    cli.py                 <- Typer CLI (setup, reindex, graph, find-links, review-links, compress)
+    config.py              <- loom-settings.json loader (incl. semantic_links_* fields)
+    db.py                  <- SQLite schema + connection (7 tables)
     server.py              <- MCP server (tools + resources)
     capture/               <- event buffer, classifier, note builder
-    retrieval/             <- embedder, chunker, chroma, graph, hybrid
+    retrieval/             <- embedder, chunker, chroma, graph, hybrid, semantic_links
+      embedder.py          <- Ollama HTTP client with auto-start recovery
+      chunker.py           <- Async semantic + heading-aware chunker, content-addressed IDs
+      chroma_store.py      <- ChromaDB vector store (upsert/query/delete/get-by-id)
+      indexer.py           <- Chunk-level incremental indexer + note-level mean-pool embeddings
+      graph.py             <- Wikilink BFS traversal (SQLite-backed)
+      hybrid.py            <- 3-stage retrieval + on-search link queuing
+      semantic_links.py    <- Pairwise similarity discovery -> pending_links queue
+    ui/                    <- Local link review web UI
+      server.py            <- FastAPI app (approve/reject semantic links, trigger discovery)
     compression/           <- scheduler, summarizer, extractor
     services/              <- Ollama lifecycle manager
     vault/                 <- VaultClient facade, filesystem fallback, sync, markdown parser
@@ -160,7 +170,7 @@ loom/
 ### Data handling
 - No telemetry, analytics, or usage reporting — ever
 - ChromaDB vectors and vault content are local-only; treat as sensitive (same handling as source code)
-- Do not send vault content to external services beyond: Claude API (compression, opt-in only)
+- Do not send vault content to external services beyond: Anthropic API (compression, opt-in only, only when `compression_llm_provider = "anthropic"`). Default compression uses Ollama (local).
 
 ---
 
@@ -169,7 +179,7 @@ loom/
 | Concern | Policy |
 |---------|--------|
 | Data residency | All data is local by default: vault, ChromaDB, SQLite. No cloud services required. |
-| External API calls | Ollama: localhost only. Claude API: opt-in, user's own key. |
+| External API calls | Ollama: localhost only. Anthropic API: opt-in, user's own key, only when `compression_llm_provider = "anthropic"`. |
 | Vault sync | Obsidian Sync is user-configured and user-managed. Loom has no opinion on sync provider. |
 | PII in notes | Loom does not redact PII. Users are responsible for what they capture in the vault. |
 | Open source | MIT license. No contributor CLA required. |
@@ -191,12 +201,14 @@ loom/
 ## Key Constraints (Do Not Violate)
 
 - **Ollama required**: Never add a code path that skips embedding or falls back to non-Ollama embedding without user config change
-- **Compression is opt-in**: `compression.enabled` defaults to `false`. Never enable it automatically.
+- **Compression is opt-in**: `compression.enabled` defaults to `false`. Never enable it automatically. Compression uses Ollama by default (`compression_llm_provider = "ollama"`); an Anthropic key is only required when the user explicitly sets `compression_llm_provider = "anthropic"`.
+- **Semantic links require approval**: `pending_links` entries must never be written to the vault as wikilinks without explicit user approval via `loom review-links`. The `auto_on_search` config gate defaults to `false`.
 - **Vault path is `~/.loom/vault/`**: Do not use the user's existing Obsidian vault. Loom manages its own vault.
 - **MCP tools never block**: Hooks (`buffer-event`, `flush`) must exit quickly. Heavy work is async and non-blocking.
 - **No feature flags in production code**: Features are either complete or stubbed with a clear `NotImplementedError`. No `if DEBUG` branches in shipped code.
 - **SQLite is local only**: Never replicate SQLite data to a remote service. It is a local cache, not source of truth.
 - **ChromaDB is local only**: Vector data stays on disk at `~/.loom/chroma/`. Never send vectors to external services.
+- **`chunk_note()` is async**: It accepts an optional `OllamaEmbedder` for semantic breakpoint detection. Always `await` it; never call it synchronously.
 
 ---
 
@@ -208,10 +220,13 @@ loom/
 | `loom setup --non-interactive` | Unattended setup with all defaults |
 | `loom config show` | Print settings (keys masked) |
 | `loom config set <key> <val>` | Update a single setting |
-| `loom reindex` | Incrementally sync vault to ChromaDB |
+| `loom reindex` | Incrementally sync vault to ChromaDB (chunk-level skip for unchanged chunks) |
 | `loom reindex --force` | Full re-embed all vault notes |
 | `loom graph rebuild` | Rebuild wikilink graph cache in SQLite |
 | `loom graph stats` | Print node/edge counts |
+| `loom find-links` | Scan note embeddings, queue semantically similar pairs for review |
+| `loom review-links` | Start browser UI at localhost:7842 to approve/reject link suggestions |
+| `loom review-links --port N` | Use a custom port |
 | `loom compress --project <name>` | Run compression for a project |
 | `loom compress --dry-run` | Show what would be compressed |
 | `loom buffer-event` | (Hook) Buffer a tool event to SQLite |
@@ -256,3 +271,8 @@ loom/
 | Direct import over MCP protocol | Loom imports `ObsidianCLI` as a Python library to avoid MCP serialization overhead; the MCP server exists as a separate entry point for external agents |
 | Compression opt-in | User data safety; compression is irreversible without archive; trust must be earned |
 | `loom-settings.json` (not TOML/env) | JSON is stdlib-parseable, familiar, and easy to generate from setup wizard |
+| Semantic chunking (Ollama-guided, async) | Splits at meaning changes rather than character counts; heading breadcrumbs preserve retrieval context |
+| Content-addressed chunk IDs | `{path}#{sha256(text)[:8]}` — stable IDs enable chunk-level incremental skip, avoiding re-embedding unchanged text |
+| Mean-pooled note embedding in SQLite | Single compact vector per note (packed float BLOB) allows stdlib-only pairwise cosine similarity; no numpy required |
+| User-approval gate for semantic links | Prevents vault pollution from false-positive similarity matches; `loom review-links` UI is the only write path |
+| Ollama-first compression LLM | Compression summarization defaults to Ollama (already a hard dependency) — no extra API key or account required. Anthropic remains available as an opt-in alternative via `compression_llm_provider = "anthropic"`. |

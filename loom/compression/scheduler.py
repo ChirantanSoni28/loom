@@ -125,11 +125,15 @@ async def run_hot_to_warm(
     week = datetime.now(UTC).strftime("%Y-W%W")
 
     # Summarize via LLM
-    api_key = config.compression_anthropic_key
-    if not api_key:
-        raise ValueError("Anthropic API key required for compression")
-
-    summary = await summarize_hot_to_warm(contents, project, week, api_key)
+    summary = await summarize_hot_to_warm(
+        contents,
+        project,
+        week,
+        provider=config.compression_llm_provider,
+        model=config.compression_llm_model,
+        ollama_base_url=config.ollama_base_url,
+        anthropic_key=config.compression_anthropic_key,
+    )
 
     # Write warm rollup
     warm_path = f"projects/{project}/sessions/warm/{week}.md"
@@ -194,11 +198,15 @@ async def run_warm_to_cold(
 
     quarter = _current_quarter()
 
-    api_key = config.compression_anthropic_key
-    if not api_key:
-        raise ValueError("Anthropic API key required for compression")
-
-    summary = await summarize_warm_to_cold(contents, project, quarter, api_key)
+    summary = await summarize_warm_to_cold(
+        contents,
+        project,
+        quarter,
+        provider=config.compression_llm_provider,
+        model=config.compression_llm_model,
+        ollama_base_url=config.ollama_base_url,
+        anthropic_key=config.compression_anthropic_key,
+    )
 
     # Write cold digest
     cold_path = f"projects/{project}/sessions/cold/{quarter}.md"

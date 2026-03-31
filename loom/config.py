@@ -30,9 +30,17 @@ class LoomConfig:
     ollama_base_url: str = "http://localhost:11434"
     compression_enabled: bool = False
     compression_require_approval: bool = True
+    compression_llm_provider: str = "ollama"
+    compression_llm_model: str = "llama3.2"
     compression_anthropic_key: str | None = None
     hot_ttl_days: int = 7
     warm_ttl_days: int = 30
+    # Semantic link discovery settings
+    semantic_links_enabled: bool = True
+    semantic_links_threshold: float = 0.82
+    semantic_links_max_per_note: int = 5
+    semantic_links_auto_on_search: bool = False
+    semantic_chunking_threshold: float = 0.15
 
     def to_settings_dict(self) -> dict:
         """Convert to the nested JSON structure used by loom-settings.json."""
@@ -51,9 +59,18 @@ class LoomConfig:
             "compression": {
                 "enabled": self.compression_enabled,
                 "require_user_approval": self.compression_require_approval,
+                "llm_provider": self.compression_llm_provider,
+                "llm_model": self.compression_llm_model,
                 "anthropic_api_key": self.compression_anthropic_key or "",
                 "hot_ttl_days": self.hot_ttl_days,
                 "warm_ttl_days": self.warm_ttl_days,
+            },
+            "semantic_links": {
+                "enabled": self.semantic_links_enabled,
+                "similarity_threshold": self.semantic_links_threshold,
+                "max_links_per_note": self.semantic_links_max_per_note,
+                "auto_on_search": self.semantic_links_auto_on_search,
+                "semantic_chunking_threshold": self.semantic_chunking_threshold,
             },
         }
 
@@ -63,6 +80,7 @@ class LoomConfig:
         obsidian = data.get("obsidian", {})
         embedding = data.get("embedding", {})
         compression = data.get("compression", {})
+        sem_links = data.get("semantic_links", {})
 
         return cls(
             vault_path=Path(data.get("vault_path", str(LOOM_DIR / "vault"))),
@@ -74,9 +92,16 @@ class LoomConfig:
             ollama_base_url=embedding.get("ollama_base_url", "http://localhost:11434"),
             compression_enabled=compression.get("enabled", False),
             compression_require_approval=compression.get("require_user_approval", True),
+            compression_llm_provider=compression.get("llm_provider", "ollama"),
+            compression_llm_model=compression.get("llm_model", "llama3.2"),
             compression_anthropic_key=compression.get("anthropic_api_key") or None,
             hot_ttl_days=compression.get("hot_ttl_days", 7),
             warm_ttl_days=compression.get("warm_ttl_days", 30),
+            semantic_links_enabled=sem_links.get("enabled", True),
+            semantic_links_threshold=sem_links.get("similarity_threshold", 0.82),
+            semantic_links_max_per_note=sem_links.get("max_links_per_note", 5),
+            semantic_links_auto_on_search=sem_links.get("auto_on_search", False),
+            semantic_chunking_threshold=sem_links.get("semantic_chunking_threshold", 0.15),
         )
 
     def masked_display(self) -> dict:
