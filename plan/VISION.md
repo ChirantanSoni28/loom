@@ -20,9 +20,9 @@ Claude Code starts cold every session. No memory of past decisions, patterns, ar
 |-------|-----------|
 | Language | Python 3.12+ |
 | MCP Server | `mcp` official Python SDK (stdio transport) |
-| Vector Store | Pinecone (cloud, shared across machines) |
+| Vector Store | ChromaDB (local, zero-config) |
 | Embeddings | Ollama `nomic-embed-text` (local, **configurable**) |
-| Vault Access | obsidian-local-rest-api (HTTPS REST) |
+| Vault Access | Obsidian CLI (`obsidian-mcp` package) |
 | Graph Cache | SQLite (`~/.loom/index.db`) |
 | LLM Compression | Claude API `claude-haiku-4-5` (opt-in, user-controlled) |
 | Config | `~/.loom/loom-settings.json` |
@@ -46,8 +46,9 @@ Claude Code starts cold every session. No memory of past decisions, patterns, ar
       patterns/                 ← cross-project code patterns
       preferences/              ← user style & preferences
       tech/                     ← notes on libs/frameworks
+  chroma/                       ← ChromaDB vector store (local, zero-config)
   index.db                      ← SQLite: graph cache + sync state + pending writes
-  loom-settings.json            ← all config (API keys, feature flags, embedding model)
+  loom-settings.json            ← all config (feature flags, embedding model)
 ```
 
 ---
@@ -57,19 +58,15 @@ Claude Code starts cold every session. No memory of past decisions, patterns, ar
 ```json
 {
   "vault_path": "~/.loom/vault",
+  "chroma_path": "~/.loom/chroma",
   "obsidian": {
-    "rest_api_key": "YOUR_KEY",
-    "rest_api_port": 27123
+    "vault_name": "loom"
   },
   "embedding": {
     "provider": "ollama",
     "model": "nomic-embed-text",
     "dimensions": 768,
     "ollama_base_url": "http://localhost:11434"
-  },
-  "pinecone": {
-    "api_key": "YOUR_KEY",
-    "index_name": "loom-vault"
   },
   "compression": {
     "enabled": false,
@@ -81,7 +78,7 @@ Claude Code starts cold every session. No memory of past decisions, patterns, ar
 }
 ```
 
-**Embedding model is configurable** — change `embedding.model` + `embedding.dimensions`, then run `loom reindex` to re-embed the vault into Pinecone.
+**Embedding model is configurable** — change `embedding.model` + `embedding.dimensions`, then run `loom reindex` to re-embed the vault into ChromaDB.
 
 ---
 
@@ -104,19 +101,19 @@ Claude Code starts cold every session. No memory of past decisions, patterns, ar
 │                                                            │
 │  Capture Engine      Retrieval Engine    Compression       │
 │  ─────────────       ────────────────   ──────────────    │
-│  classify event      1. Pinecone vec    hot→warm rollup    │
+│  classify event      1. ChromaDB vec    hot→warm rollup    │
 │  extract decisions   2. graph BFS       warm→cold digest   │
 │  build note          3. rerank+merge    user approval      │
 │  write to vault                         opt-in only        │
 └──────────────┬───────────────┬────────────────────────────┘
                │               │
    ┌───────────▼───┐   ┌───────▼──────────────────────────┐
-   │  OBSIDIAN     │   │  LOCAL SQLite + Pinecone          │
-   │  REST API     │   │                                   │
+   │  OBSIDIAN     │   │  LOCAL SQLite + ChromaDB           │
+   │  CLI          │   │                                   │
    │               │   │  graph cache (wikilinks adj)      │
    │  ~/.loom/     │   │  sync state  (file hashes)        │
    │  vault/       │   │  pending_writes (offline queue)   │
-   │               │   │  Pinecone: 768-dim vectors        │
+   │               │   │  ChromaDB: 768-dim vectors        │
    └───────────────┘   └───────────────────────────────────┘
 ```
 
@@ -128,7 +125,7 @@ Three-stage hybrid retrieval on every query:
 
 ```
 1. VECTOR SEARCH (fast, semantic)
-   Query → Ollama embed → Pinecone cosine similarity
+   Query → Ollama embed → ChromaDB cosine similarity
    Filtered by project + tier metadata
    → top-K candidates
 
@@ -150,7 +147,7 @@ Three-stage hybrid retrieval on every query:
 Inspired by: LSM-tree compaction + GraphRAG community summaries + MemGPT tiered memory.
 
 ```
-HOT    (0-7 days)    Full session notes. Fully indexed in Pinecone.
+HOT    (0-7 days)    Full session notes. Fully indexed in ChromaDB.
 WARM   (7-30 days)   Weekly rollups. Key decisions extracted first.
 COLD   (30+ days)    Quarterly digests. Merged into architecture.md.
 PERMANENT            decisions/ + knowledge/ — never compressed.
@@ -165,8 +162,8 @@ PERMANENT            decisions/ + knowledge/ — never compressed.
 ## Multi-Machine Support
 
 - `~/.loom/vault/` syncs via **Obsidian Sync** (user opt-in) — all notes available everywhere
-- `~/.loom/loom-settings.json` configured per-machine (API keys stay local)
-- Pinecone index is shared — all machines read/write the same index
+- `~/.loom/loom-settings.json` configured per-machine (settings stay local)
+- ChromaDB is local per machine; run `loom reindex` after vault sync to rebuild vectors
 - Ollama runs locally on each machine (hard dependency)
 
 ---
@@ -175,7 +172,7 @@ PERMANENT            decisions/ + knowledge/ — never compressed.
 
 ```bash
 claude plugin install chirantansoni/loom
-loom setup    # interactive wizard
+loom setup    # fully automatic setup
 ```
 
 ---
@@ -188,7 +185,7 @@ loom setup    # interactive wizard
 | F02 | [Obsidian Vault Integration](features/F02-obsidian-vault.md) | complete |
 | F03 | [MCP Server Core](features/F03-mcp-server.md) | complete |
 | F04 | [Capture Engine + Hooks](features/F04-capture-hooks.md) | complete |
-| F05 | [Vector Indexing — Pinecone + Ollama](features/F05-vector-indexing.md) | complete |
+| F05 | [Vector Indexing — ChromaDB + Ollama](features/F05-vector-indexing.md) | complete |
 | F06 | [Graph Traversal — Wikilink Graph](features/F06-graph-traversal.md) | complete |
 | F07 | [Hybrid Retrieval Engine](features/F07-hybrid-retrieval.md) | complete |
 | F08 | [Compression Scheduler](features/F08-compression.md) | complete |

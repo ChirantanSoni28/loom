@@ -4,15 +4,14 @@ Obsidian-backed graph retrieval memory for Claude Code. Loom automatically captu
 
 ## Prerequisites
 
-Before installing Loom, you need:
-
 | Dependency | Why | Install |
 |---|---|---|
 | **Python 3.12+** | Runtime | [python.org](https://www.python.org/downloads/) |
-| **Ollama** | Local embeddings (hard dependency) | [ollama.com/download](https://ollama.com/download) |
-| **Pinecone account** | Vector storage for semantic search | [pinecone.io](https://www.pinecone.io/) |
+| **Ollama** | Local embeddings | Auto-installed by `loom setup` if missing |
 | **Obsidian** (optional) | Rich vault browsing, backlinks, tags | [obsidian.md](https://obsidian.md/) |
 | **Anthropic API key** (optional) | Compression feature (Claude Haiku) | [console.anthropic.com](https://console.anthropic.com/) |
+
+No external accounts or API keys are required for core functionality. Loom uses ChromaDB (local) for vector storage and Ollama (local) for embeddings.
 
 ## Quick Start
 
@@ -24,21 +23,21 @@ cd loom
 # 2. Install (uv preferred, pip also works)
 uv pip install -e .
 
-# 3. Run the setup wizard
+# 3. Run the setup wizard (fully automatic)
 loom setup
 ```
 
-The setup wizard walks you through 7 steps:
+The setup wizard runs 5 automatic steps — no prompts required:
 
-1. **Check Ollama** — verifies Ollama is installed, pulls `nomic-embed-text` model
-2. **Create vault** — creates `~/.loom/vault/` directory tree (projects/, knowledge/)
-3. **Initialize DB** — creates SQLite schema at `~/.loom/index.db`
-4. **Obsidian CLI** — prompts for your Obsidian vault name (default: `loom`)
-5. **Pinecone** — prompts for your API key
-6. **Anthropic key** — optional, enables compression (press Enter to skip)
-7. **Save config** — writes `~/.loom/loom-settings.json` (mode 600)
+1. **Ollama** — installs if missing, starts server, pulls `nomic-embed-text` model
+2. **Vault** — creates `~/.loom/vault/` directory tree (projects/, knowledge/)
+3. **Database** — creates SQLite schema at `~/.loom/index.db`
+4. **Vector store** — initializes ChromaDB at `~/.loom/chroma/`
+5. **Config** — writes `~/.loom/loom-settings.json` (mode 600)
 
-After setup, point Obsidian at `~/.loom/vault/` to browse your knowledge base visually.
+For fully unattended setup (CI, scripts): `loom setup --non-interactive`
+
+After setup, optionally point Obsidian at `~/.loom/vault/` to browse your knowledge base visually.
 
 ### Register with Claude Code
 
@@ -60,7 +59,7 @@ loom setup                          # First-time setup wizard
 loom config show                    # Print settings (API keys masked)
 loom config set <key> <value>       # Update a single setting
 
-loom reindex                        # Incrementally sync vault to Pinecone
+loom reindex                        # Incrementally sync vault to ChromaDB
 loom reindex --force                # Full re-embed all vault notes
 loom reindex --path <file>          # Index a single note
 
@@ -141,9 +140,10 @@ Claude Code Session
     sync_state                    <-- Content hashes for incremental indexing
     graph_cache                   <-- Wikilink adjacency list
 
+  chroma/                         <-- ChromaDB vector store (local, zero-config)
+
   loom-settings.json              <-- Config (mode 600, secrets masked in display)
 
-Pinecone (cloud)                  <-- Vector index for semantic search
 Ollama (localhost:11434)          <-- Embedding generation (nomic-embed-text, 768-dim)
 ```
 
@@ -164,9 +164,9 @@ loom/
     note_builder.py    Markdown session & decision note assembly with auto-wikilinks
 
   retrieval/           Hybrid vector + graph search
-    embedder.py        Ollama HTTP client (/api/embed)
+    embedder.py        Ollama HTTP client (/api/embed) with auto-start recovery
     chunker.py         Heading-aware overlapping chunker (512 char target)
-    pinecone_store.py  Pinecone upsert/query/delete (batch 100)
+    chroma_store.py    ChromaDB local vector store (upsert/query/delete)
     indexer.py         Scan -> chunk -> embed -> upsert pipeline (incremental by content hash)
     graph.py           Wikilink graph with BFS traversal (SQLite-backed)
     hybrid.py          3-stage search: vector -> graph expansion -> rerank
@@ -176,6 +176,9 @@ loom/
     scheduler.py       TTL checks, hot->warm and warm->cold transitions
     extractor.py       Decision & pattern extraction from session notes
     summarizer.py      LLM summarization via Claude Haiku
+
+  services/            Background service management
+    ollama_manager.py  Auto-install, start, model pull for Ollama
 
   vault/               Obsidian vault access layer
     __init__.py        VaultClient facade (Obsidian CLI -> filesystem fallback)
@@ -247,7 +250,7 @@ When Claude calls `loom_search`, the hybrid retrieval engine runs a 3-stage pipe
 ```
 STAGE 1: Vector Search
   - Embed query text via Ollama (nomic-embed-text, 768-dim)
-  - Query Pinecone: cosine similarity, optional project filter
+  - Query ChromaDB: cosine similarity, optional project filter
   - Returns top-K results with scores + metadata
 
 STAGE 2: Graph Expansion
@@ -275,7 +278,7 @@ loom reindex (cli.py -> indexer.py)
      d. Chunk: heading boundaries -> paragraph -> word boundaries
         (512 char target, 64 char overlap, merge small chunks)
      e. Embed chunks via Ollama batch API
-     f. Delete old vectors in Pinecone (by note path)
+     f. Delete old vectors in ChromaDB (by note path)
      g. Upsert new vectors (batch 100, ID: {path}#{chunk_index})
      h. Update sync_state with new hash
   3. Remove vectors for deleted notes
@@ -287,7 +290,7 @@ Loom uses LSM-tree inspired tiering to keep the vault useful as it grows:
 
 ```
 TIER        AGE         CONTENT                INDEXED
-hot         0-7 days    Full session notes     Full vectors in Pinecone
+hot         0-7 days    Full session notes     Full vectors in ChromaDB
   |
   | [hot_ttl_days elapsed, loom compress triggered]
   v
@@ -377,6 +380,7 @@ Config lives at `~/.loom/loom-settings.json` (file mode 600):
 ```json
 {
   "vault_path": "~/.loom/vault",
+  "chroma_path": "~/.loom/chroma",
   "obsidian": {
     "vault_name": "loom"
   },
@@ -385,10 +389,6 @@ Config lives at `~/.loom/loom-settings.json` (file mode 600):
     "model": "nomic-embed-text",
     "dimensions": 768,
     "ollama_base_url": "http://localhost:11434"
-  },
-  "pinecone": {
-    "api_key": "...",
-    "index_name": "loom-vault"
   },
   "compression": {
     "enabled": false,
@@ -406,7 +406,7 @@ Config lives at `~/.loom/loom-settings.json` (file mode 600):
 |---|---|
 | Ollama as hard dependency | Avoids API costs for embeddings; local privacy; clear failure > silent fallback |
 | Separate `~/.loom/vault/` | Avoids polluting user's existing Obsidian vault |
-| Pinecone over sqlite-vec | Cloud persistence enables multi-machine use |
+| ChromaDB (local) | Zero-config setup; no external accounts; privacy-first |
 | SQLite as local cache only | Vault markdown is source of truth, not the database |
 | Compression opt-in | User data safety; compression is irreversible without archive |
 | MCP stdio (not HTTP) | No external ports opened; standard MCP transport |

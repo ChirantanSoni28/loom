@@ -1,16 +1,15 @@
-"""Indexing pipeline — scan vault, chunk, embed, upsert to Pinecone."""
+"""Indexing pipeline — scan vault, chunk, embed, upsert to ChromaDB."""
 
 import hashlib
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from loom.config import LoomConfig
 from loom.db import get_connection
-from loom.retrieval.chunker import Chunk, chunk_note
+from loom.retrieval.chunker import chunk_note
+from loom.retrieval.chroma_store import ChromaStore
 from loom.retrieval.embedder import OllamaEmbedder
-from loom.retrieval.pinecone_store import PineconeStore
-from loom.vault.filesystem import FilesystemVaultClient
 from loom.vault.markdown import parse_note
 
 
@@ -32,7 +31,7 @@ async def reindex_vault(
     force: bool = False,
     single_path: str | None = None,
 ) -> IndexReport:
-    """Scan the vault and index changed notes into Pinecone.
+    """Scan the vault and index changed notes into ChromaDB.
 
     Incremental by default: only re-indexes notes whose content hash
     has changed since the last run. Use force=True to re-index everything.
@@ -53,15 +52,10 @@ async def reindex_vault(
         base_url=config.ollama_base_url,
         model=config.embedding_model,
     )
-    store = PineconeStore(
-        api_key=config.pinecone_api_key,
-        index_name=config.pinecone_index_name,
-        dimensions=config.embedding_dimensions,
-    )
+    store = ChromaStore(persist_path=config.chroma_path)
 
     try:
         if single_path:
-            # Index a single note
             abs_path = vault_path / single_path
             if abs_path.exists():
                 await _index_file(
@@ -69,17 +63,14 @@ async def reindex_vault(
                 )
             return report
 
-        # Scan all .md files in the vault
         vault_files = _scan_vault(vault_path)
         report.total_notes = len(vault_files)
 
-        # Index each file
         for abs_path, rel_path in vault_files:
             await _index_file(
                 abs_path, vault_path, db, embedder, store, report, force,
             )
 
-        # Clean up stale entries (notes deleted from vault)
         if not single_path:
             current_paths = {rel for _, rel in vault_files}
             report.deleted_notes = await _cleanup_stale(
@@ -155,11 +146,11 @@ async def _index_file(
     vault_path: Path,
     db: sqlite3.Connection,
     embedder: OllamaEmbedder,
-    store: PineconeStore,
+    store: ChromaStore,
     report: IndexReport,
     force: bool,
 ) -> None:
-    """Index a single file: hash check → parse → chunk → embed → upsert."""
+    """Index a single file: hash check -> parse -> chunk -> embed -> upsert."""
     rel_path = str(abs_path.relative_to(vault_path))
     content = abs_path.read_text(encoding="utf-8")
     current_hash = _content_hash(content)
@@ -180,7 +171,6 @@ async def _index_file(
         else:
             report.changed_notes += 1
 
-    # Parse and chunk
     parsed = parse_note(rel_path, content)
     chunks = chunk_note(parsed)
 
@@ -188,28 +178,24 @@ async def _index_file(
         _update_hash(db, rel_path, current_hash)
         return
 
-    # Embed
     texts = [c.text for c in chunks]
     embeddings = await embedder.embed_batch(texts)
 
-    # Delete old vectors for this note before upserting new ones
     await store.delete_by_path(rel_path)
 
-    # Upsert
     upserted = await store.upsert_chunks(chunks, embeddings)
     report.total_chunks += len(chunks)
     report.vectors_upserted += upserted
 
-    # Update sync state
     _update_hash(db, rel_path, current_hash)
 
 
 async def _cleanup_stale(
     db: sqlite3.Connection,
-    store: PineconeStore,
+    store: ChromaStore,
     current_paths: set[str],
 ) -> int:
-    """Remove sync_state entries and Pinecone vectors for deleted notes."""
+    """Remove sync_state entries and ChromaDB vectors for deleted notes."""
     cursor = db.execute("SELECT path FROM sync_state")
     stored_paths = {row[0] for row in cursor.fetchall()}
 

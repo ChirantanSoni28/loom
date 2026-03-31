@@ -23,7 +23,7 @@
 | MCP SDK | `mcp` (Anthropic official) | >=1.0 |
 | CLI | `typer` + `rich` | >=0.12 |
 | HTTP client | `httpx` (async) | >=0.27 |
-| Vector store | Pinecone | >=5.0 |
+| Vector store | ChromaDB (local) | >=0.5 |
 | Embeddings | Ollama (local) | hard dependency |
 | Default model | `nomic-embed-text` | 768-dim |
 | LLM compression | `anthropic` SDK | >=0.40 |
@@ -37,12 +37,13 @@
 
 ## Architecture Principles
 
-1. **Local-first**: All data lives in `~/.loom/vault/` by default. Cloud services (Pinecone) are opt-in for features that require them.
-2. **Obsidian as source of truth**: The vault is human-readable, human-editable markdown. Never store critical data only in SQLite or Pinecone.
-3. **Graceful degradation**: If Obsidian is closed, writes queue to SQLite and flush on reconnect. If Pinecone is unavailable, fall back to keyword search.
+1. **Local-first**: All data lives in `~/.loom/` — vault, ChromaDB vectors, SQLite cache. No cloud services required.
+2. **Obsidian as source of truth**: The vault is human-readable, human-editable markdown. Never store critical data only in SQLite or ChromaDB.
+3. **Graceful degradation**: If Obsidian is closed, writes queue to SQLite and flush on reconnect. If Ollama is stopped, the embedder auto-restarts it.
 4. **Ollama is a hard dependency**: Do not add fallback paths that skip embedding. Fail clearly with install instructions.
 5. **User consent for compression**: Compression is `disabled` by default. Never compress without explicit user opt-in.
 6. **MCP stdio transport**: The MCP server communicates via stdio, not HTTP. No external ports opened by the server process.
+7. **Zero-config setup**: `loom setup` must work with no user input and no external accounts. Ollama is auto-installed and auto-started.
 
 ---
 
@@ -74,32 +75,33 @@ uv run ruff check loom/
 
 ```
 loom/
-  loom/                    ← Python package
-    __main__.py            ← entry point (`python -m loom`)
-    cli.py                 ← Typer CLI
-    config.py              ← loom-settings.json loader
-    db.py                  ← SQLite schema + connection
-    server.py              ← MCP server (tools + resources)
-    capture/               ← event buffer, classifier, note builder
-    retrieval/             ← embedder, chunker, pinecone, graph, hybrid
-    compression/           ← scheduler, summarizer, extractor
-    vault/                 ← VaultClient facade, filesystem fallback, sync, markdown parser
-  obsidian-mcp/            ← standalone MCP server for Obsidian (separate package)
+  loom/                    <- Python package
+    __main__.py            <- entry point (`python -m loom`)
+    cli.py                 <- Typer CLI
+    config.py              <- loom-settings.json loader
+    db.py                  <- SQLite schema + connection
+    server.py              <- MCP server (tools + resources)
+    capture/               <- event buffer, classifier, note builder
+    retrieval/             <- embedder, chunker, chroma, graph, hybrid
+    compression/           <- scheduler, summarizer, extractor
+    services/              <- Ollama lifecycle manager
+    vault/                 <- VaultClient facade, filesystem fallback, sync, markdown parser
+  obsidian-mcp/            <- standalone MCP server for Obsidian (separate package)
     obsidian_mcp/
-      cli.py               ← async subprocess wrapper for Obsidian CLI
-      server.py            ← FastMCP server (30+ tools)
-      __main__.py           ← `python -m obsidian_mcp` entry point
+      cli.py               <- async subprocess wrapper for Obsidian CLI
+      server.py            <- FastMCP server (30+ tools)
+      __main__.py          <- `python -m obsidian_mcp` entry point
     tests/
     pyproject.toml
     README.md
-  .claude-plugin/          ← Claude Code plugin manifest + hooks config
-  plan/                    ← architecture docs and feature breakdown
+  .claude-plugin/          <- Claude Code plugin manifest + hooks config
+  plan/                    <- architecture docs and feature breakdown
     VISION.md
     features/F0N-*.md
-  scripts/                 ← install + test scripts
-  tests/                   ← pytest test suite
+  scripts/                 <- install + test scripts
+  tests/                   <- pytest test suite
   pyproject.toml
-  CLAUDE.md                ← this file
+  CLAUDE.md                <- this file
   README.md
 ```
 
@@ -121,7 +123,7 @@ loom/
 
 ### Imports
 - Absolute imports only (`from loom.config import load_config`, not relative)
-- Group: stdlib → third-party → internal
+- Group: stdlib -> third-party -> internal
 
 ### Naming
 - `snake_case` for functions, variables, files
@@ -157,8 +159,8 @@ loom/
 
 ### Data handling
 - No telemetry, analytics, or usage reporting — ever
-- Pinecone vectors contain text chunks; treat as sensitive (same handling as source code)
-- Do not send vault content to external services beyond: Pinecone (vectors), Claude API (compression, opt-in only)
+- ChromaDB vectors and vault content are local-only; treat as sensitive (same handling as source code)
+- Do not send vault content to external services beyond: Claude API (compression, opt-in only)
 
 ---
 
@@ -166,8 +168,8 @@ loom/
 
 | Concern | Policy |
 |---------|--------|
-| Data residency | Vault is local-only by default. Cloud services (Pinecone) used only for vector index. |
-| External API calls | Ollama: localhost only. Pinecone: user's own account. Claude API: opt-in, user's own key. |
+| Data residency | All data is local by default: vault, ChromaDB, SQLite. No cloud services required. |
+| External API calls | Ollama: localhost only. Claude API: opt-in, user's own key. |
 | Vault sync | Obsidian Sync is user-configured and user-managed. Loom has no opinion on sync provider. |
 | PII in notes | Loom does not redact PII. Users are responsible for what they capture in the vault. |
 | Open source | MIT license. No contributor CLA required. |
@@ -181,7 +183,7 @@ loom/
 3. Implement all files listed under "Files" section
 4. Verify all acceptance criteria listed at the bottom of the feature file
 5. **Do not proceed to the next feature until the current one is reviewed by the user**
-6. Update `plan/VISION.md` feature table status: `pending` → `in_progress` → `complete`
+6. Update `plan/VISION.md` feature table status: `pending` -> `in_progress` -> `complete`
 7. **Update `CHANGELOG.md`** — log all added/changed/removed items under the feature heading before moving on
 
 ---
@@ -194,6 +196,7 @@ loom/
 - **MCP tools never block**: Hooks (`buffer-event`, `flush`) must exit quickly. Heavy work is async and non-blocking.
 - **No feature flags in production code**: Features are either complete or stubbed with a clear `NotImplementedError`. No `if DEBUG` branches in shipped code.
 - **SQLite is local only**: Never replicate SQLite data to a remote service. It is a local cache, not source of truth.
+- **ChromaDB is local only**: Vector data stays on disk at `~/.loom/chroma/`. Never send vectors to external services.
 
 ---
 
@@ -201,10 +204,11 @@ loom/
 
 | Command | Description |
 |---------|-------------|
-| `loom setup` | First-time interactive setup wizard |
+| `loom setup` | Fully automatic setup (installs Ollama, creates vault, inits ChromaDB) |
+| `loom setup --non-interactive` | Unattended setup with all defaults |
 | `loom config show` | Print settings (keys masked) |
 | `loom config set <key> <val>` | Update a single setting |
-| `loom reindex` | Incrementally sync vault to Pinecone |
+| `loom reindex` | Incrementally sync vault to ChromaDB |
 | `loom reindex --force` | Full re-embed all vault notes |
 | `loom graph rebuild` | Rebuild wikilink graph cache in SQLite |
 | `loom graph stats` | Print node/edge counts |
@@ -232,7 +236,7 @@ loom/
 ## Testing Standards
 
 - **Unit tests** for: classifier, note_builder, chunker, graph BFS, config loader
-- **Integration tests** for: VaultClient (against live Obsidian or filesystem fallback), Pinecone upsert/query, hybrid retrieval pipeline
+- **Integration tests** for: VaultClient (against live Obsidian or filesystem fallback), ChromaDB upsert/query, hybrid retrieval pipeline
 - **No mocking of Ollama** — tests requiring embeddings use a `test` fixture model or skip if Ollama not available
 - Test vault: `tests/fixtures/vault/` — a small seed vault with known notes and wikilinks
 - All tests must pass before merging to `main`
@@ -244,8 +248,8 @@ loom/
 
 | Decision | Rationale |
 |----------|-----------|
-| Python over TypeScript | Richer async AI ecosystem; anthropic + pinecone SDKs are Python-native |
-| Pinecone over sqlite-vec | Cloud persistence enables multi-machine use; user already has API access |
+| Python over TypeScript | Richer async AI ecosystem; anthropic SDK is Python-native |
+| ChromaDB over Pinecone | Local-first, zero-config, no external accounts needed; privacy-first |
 | Ollama as hard dependency | Avoids API costs for embeddings; local privacy; clear failure message is better than silent fallback |
 | Separate `~/.loom/vault/` | Avoids polluting user's existing Obsidian vault with auto-generated content |
 | Obsidian CLI over REST API | Official CLI supports headless sync (remote vaults), backlinks, tags, properties natively; REST API was a community plugin. CLI packaged as standalone `obsidian-mcp` MCP server for reuse. |

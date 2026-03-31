@@ -30,7 +30,7 @@ def chunk_note(
     splitting at paragraph boundaries, then at word boundaries.
 
     Each chunk inherits the note's frontmatter metadata (project, type,
-    tier, tags, date) for Pinecone filtering.
+    tier, tags, date) for vector store filtering.
 
     Args:
         parsed: A ParsedNote with frontmatter and body.
@@ -77,7 +77,7 @@ def chunk_note(
 
 
 def _extract_metadata(parsed: ParsedNote) -> dict:
-    """Extract Pinecone-relevant metadata from note frontmatter."""
+    """Extract vector store metadata from note frontmatter."""
     fm = parsed.frontmatter
     meta: dict = {"note_path": parsed.path}
 
@@ -101,7 +101,7 @@ def _extract_metadata(parsed: ParsedNote) -> dict:
     elif path.startswith("knowledge/") or "/knowledge/" in path:
         meta["tier"] = "permanent"
 
-    # Tags as a list (Pinecone supports list metadata)
+    # Tags as a comma-separated string for metadata filtering
     if parsed.tags:
         meta["tags"] = parsed.tags
 

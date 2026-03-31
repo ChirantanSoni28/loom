@@ -168,7 +168,7 @@ async def loom_search(
 ) -> str:
     """Search the vault using hybrid vector + graph retrieval.
 
-    Combines semantic vector search (Pinecone) with graph expansion
+    Combines semantic vector search (ChromaDB) with graph expansion
     (wikilink BFS) and reranks results. Falls back to keyword search
     if vector search is unavailable.
 

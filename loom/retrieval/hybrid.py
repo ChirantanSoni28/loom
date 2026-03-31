@@ -1,13 +1,12 @@
 """Hybrid retrieval — merge vector search with graph expansion and rerank."""
 
-import sqlite3
 from dataclasses import dataclass, field
 
 from loom.config import LoomConfig
 from loom.db import get_connection
+from loom.retrieval.chroma_store import ChromaStore
 from loom.retrieval.embedder import OllamaEmbedder, OllamaNotAvailableError
 from loom.retrieval.graph import VaultGraph
-from loom.retrieval.pinecone_store import PineconeStore
 from loom.vault import VaultClient
 
 
@@ -16,9 +15,9 @@ class HybridResult:
     """A search result combining vector score and graph distance."""
 
     path: str
-    score: float           # combined score
-    vector_score: float    # raw Pinecone score (0 if graph-only)
-    graph_hops: int        # 0 if from vector search, 1+ if from graph
+    score: float
+    vector_score: float
+    graph_hops: int
     excerpt: str
     metadata: dict = field(default_factory=dict)
 
@@ -32,7 +31,7 @@ async def hybrid_search(
 ) -> list[HybridResult]:
     """Full 3-stage hybrid retrieval pipeline.
 
-    Stage 1: Vector search via Pinecone
+    Stage 1: Vector search via ChromaDB
     Stage 2: Graph expansion via BFS on wikilink graph
     Stage 3: Rerank and merge
 
@@ -52,23 +51,17 @@ async def hybrid_search(
     )
 
     try:
-        # Stage 1: Vector search
         embedding = await embedder.embed(query)
     except OllamaNotAvailableError:
         return []
     finally:
         await embedder.close()
 
-    store = PineconeStore(
-        api_key=config.pinecone_api_key,
-        index_name=config.pinecone_index_name,
-        dimensions=config.embedding_dimensions,
-    )
+    store = ChromaStore(persist_path=config.chroma_path)
 
     filter_dict = {"project": project} if project else None
     vector_hits = await store.query(embedding, top_k=top_k, filter=filter_dict)
 
-    # Build initial results from vector hits
     results: dict[str, HybridResult] = {}
     for hit in vector_hits:
         results[hit.path] = HybridResult(

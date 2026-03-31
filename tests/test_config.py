@@ -38,27 +38,30 @@ class TestLoomConfig:
     def test_round_trip_settings_dict(self) -> None:
         config = LoomConfig(
             obsidian_vault_name="my-vault",
-            pinecone_api_key="pc-key-456",
+            compression_anthropic_key="anthro-key-1234",
         )
         settings = config.to_settings_dict()
         restored = LoomConfig.from_settings_dict(settings)
         assert restored.obsidian_vault_name == "my-vault"
-        assert restored.pinecone_api_key == "pc-key-456"
+        assert restored.compression_anthropic_key == "anthro-key-1234"
         assert restored.vault_path == config.vault_path
 
     def test_masked_display_hides_secrets(self) -> None:
         config = LoomConfig(
-            pinecone_api_key="another-secret",
             compression_anthropic_key="anthro-key-1234",
         )
         masked = config.masked_display()
-        assert masked["pinecone"]["api_key"] == "...cret"
         assert masked["compression"]["anthropic_api_key"] == "...1234"
 
     def test_vault_name_not_masked(self) -> None:
         config = LoomConfig(obsidian_vault_name="my-vault")
         masked = config.masked_display()
         assert masked["obsidian"]["vault_name"] == "my-vault"
+
+    def test_chroma_path_in_settings(self) -> None:
+        config = LoomConfig()
+        settings = config.to_settings_dict()
+        assert "chroma_path" in settings
 
 
 class TestMaskValue:

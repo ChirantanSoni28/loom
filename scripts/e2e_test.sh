@@ -14,11 +14,12 @@ python -c "from loom.config import load_config; load_config()" 2>/dev/null \
 echo "[2/6] Imports..."
 python -c "
 from loom.capture import CaptureEngine, classify_event, buffer_event
-from loom.retrieval import OllamaEmbedder, PineconeStore, chunk_note, reindex_vault
+from loom.retrieval import OllamaEmbedder, ChromaStore, chunk_note, reindex_vault
 from loom.retrieval.graph import VaultGraph
 from loom.retrieval.hybrid import hybrid_search
 from loom.retrieval.context_builder import build_context
 from loom.compression import check_compression, extract_decisions
+from loom.services import OllamaManager
 from loom.server import server
 print('  OK: all modules import')
 "

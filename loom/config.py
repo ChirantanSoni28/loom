@@ -8,9 +8,6 @@ from pathlib import Path
 LOOM_DIR = Path.home() / ".loom"
 CONFIG_PATH = LOOM_DIR / "loom-settings.json"
 
-# Keys that contain secrets and should be masked in display
-_SECRET_KEYS = {"pinecone_api_key", "compression_anthropic_key"}
-
 
 class LoomConfigNotFoundError(Exception):
     """Raised when loom-settings.json does not exist."""
@@ -25,13 +22,12 @@ class LoomConfigNotFoundError(Exception):
 @dataclass
 class LoomConfig:
     vault_path: Path = field(default_factory=lambda: LOOM_DIR / "vault")
+    chroma_path: Path = field(default_factory=lambda: LOOM_DIR / "chroma")
     obsidian_vault_name: str = ""
     embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
     embedding_dimensions: int = 768
     ollama_base_url: str = "http://localhost:11434"
-    pinecone_api_key: str = ""
-    pinecone_index_name: str = "loom-vault"
     compression_enabled: bool = False
     compression_require_approval: bool = True
     compression_anthropic_key: str | None = None
@@ -42,6 +38,7 @@ class LoomConfig:
         """Convert to the nested JSON structure used by loom-settings.json."""
         return {
             "vault_path": str(self.vault_path),
+            "chroma_path": str(self.chroma_path),
             "obsidian": {
                 "vault_name": self.obsidian_vault_name,
             },
@@ -50,10 +47,6 @@ class LoomConfig:
                 "model": self.embedding_model,
                 "dimensions": self.embedding_dimensions,
                 "ollama_base_url": self.ollama_base_url,
-            },
-            "pinecone": {
-                "api_key": self.pinecone_api_key,
-                "index_name": self.pinecone_index_name,
             },
             "compression": {
                 "enabled": self.compression_enabled,
@@ -69,18 +62,16 @@ class LoomConfig:
         """Create a LoomConfig from the nested JSON structure."""
         obsidian = data.get("obsidian", {})
         embedding = data.get("embedding", {})
-        pinecone = data.get("pinecone", {})
         compression = data.get("compression", {})
 
         return cls(
             vault_path=Path(data.get("vault_path", str(LOOM_DIR / "vault"))),
+            chroma_path=Path(data.get("chroma_path", str(LOOM_DIR / "chroma"))),
             obsidian_vault_name=obsidian.get("vault_name", ""),
             embedding_provider=embedding.get("provider", "ollama"),
             embedding_model=embedding.get("model", "nomic-embed-text"),
             embedding_dimensions=embedding.get("dimensions", 768),
             ollama_base_url=embedding.get("ollama_base_url", "http://localhost:11434"),
-            pinecone_api_key=pinecone.get("api_key", ""),
-            pinecone_index_name=pinecone.get("index_name", "loom-vault"),
             compression_enabled=compression.get("enabled", False),
             compression_require_approval=compression.get("require_user_approval", True),
             compression_anthropic_key=compression.get("anthropic_api_key") or None,
@@ -106,7 +97,7 @@ def _mask_value(value: str) -> str:
 
 def _mask_secrets(d: dict) -> None:
     """Recursively mask known secret keys in a nested dict."""
-    secret_json_keys = {"api_key", "anthropic_api_key"}
+    secret_json_keys = {"anthropic_api_key"}
     for key, value in d.items():
         if isinstance(value, dict):
             _mask_secrets(value)
@@ -136,7 +127,7 @@ def save_config(config: LoomConfig) -> None:
 def set_config_value(key: str, value: str) -> LoomConfig:
     """Update a single flat config key and save.
 
-    Accepts flat keys like 'obsidian_api_key', 'embedding_model', etc.
+    Accepts flat keys like 'embedding_model', etc.
     """
     config = load_config()
     flat = asdict(config)

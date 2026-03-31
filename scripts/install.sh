@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Post-plugin-install hook — installs Loom and runs the setup wizard.
+# Post-plugin-install hook — installs Loom and runs fully automatic setup.
 set -euo pipefail
 
 echo "Installing Loom..."
@@ -12,5 +12,5 @@ else
 fi
 
 echo ""
-echo "Running Loom setup wizard..."
-loom setup
+echo "Running Loom setup..."
+loom setup --non-interactive

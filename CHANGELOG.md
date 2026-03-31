@@ -8,6 +8,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Zero-Friction Setup Overhaul
+
+#### Added
+- `loom/retrieval/chroma_store.py` — ChromaDB PersistentClient as local vector store (replaces Pinecone)
+- `loom/services/ollama_manager.py` — OllamaManager for automatic install, start, and model pull
+- `loom/services/__init__.py` — services package
+- `--non-interactive` flag on `loom setup` for fully unattended installation
+- Ollama auto-recovery in `embedder.py` — on connection failure, attempts to restart Ollama before raising error
+- `chroma_path` config field (default `~/.loom/chroma`)
+
+#### Changed
+- `loom setup` is now a 5-step fully automatic wizard (was 7-step interactive requiring Pinecone API key)
+- Vector store switched from Pinecone (cloud, requires API key) to ChromaDB (local, zero-config)
+- `indexer.py`, `hybrid.py`, `__init__.py` now use ChromaStore instead of PineconeStore
+- `scripts/install.sh` runs `loom setup --non-interactive` for fully automatic post-install
+- `scripts/e2e_test.sh` updated to import ChromaStore and OllamaManager
+
+#### Removed
+- `pinecone` dependency from `pyproject.toml`
+- `loom/retrieval/pinecone_store.py` — PineconeStore class
+- `pinecone_api_key` and `pinecone_index_name` config fields
+- Pinecone API key prompt from setup wizard
+
+---
+
 ### F01 — Project Scaffold + Setup Wizard
 
 #### Added

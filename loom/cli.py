@@ -2,8 +2,6 @@
 
 import asyncio
 import json
-import shutil
-import subprocess
 import sys
 
 import typer
@@ -38,39 +36,6 @@ app.add_typer(graph_app, name="graph")
 # loom setup
 # ---------------------------------------------------------------------------
 
-def _check_ollama() -> str:
-    """Check that Ollama is installed and return its version. Exit on failure."""
-    ollama_path = shutil.which("ollama")
-    if not ollama_path:
-        rprint(
-            "[bold red]Error:[/] Ollama is not installed.\n"
-            "Install it from: https://ollama.com/download\n"
-            "Then run `loom setup` again."
-        )
-        raise typer.Exit(code=1)
-
-    result = subprocess.run(
-        ["ollama", "version"],
-        capture_output=True,
-        text=True,
-    )
-    version = result.stdout.strip() or "unknown"
-    return version
-
-
-def _pull_model(model: str) -> None:
-    """Pull an embedding model via Ollama."""
-    rprint(f"      Pulling {model}...")
-    result = subprocess.run(
-        ["ollama", "pull", model],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        rprint(f"[bold red]Error pulling model:[/] {result.stderr.strip()}")
-        raise typer.Exit(code=1)
-    rprint("      [green]Done[/green]")
-
 
 def _create_vault_structure(vault_path: str) -> None:
     """Create the vault directory tree."""
@@ -99,67 +64,106 @@ def _prompt_api_key(label: str, required: bool = True) -> str:
 
 
 @app.command()
-def setup() -> None:
-    """Interactive first-time setup wizard."""
-    rprint(Panel("[bold]Loom Setup Wizard[/bold]", expand=False))
+def setup(
+    non_interactive: bool = typer.Option(False, "--non-interactive", help="Run with all defaults, no prompts"),
+) -> None:
+    """First-time setup wizard. Fully automatic by default.
+
+    Installs and starts Ollama, creates the vault, initializes ChromaDB,
+    and writes config — all without requiring external accounts or API keys.
+    """
+    from loom.services.ollama_manager import OllamaManager, OllamaSetupError
+
+    rprint(Panel("[bold]Loom Setup[/bold]", expand=False))
     rprint()
 
-    # Step 1: Check Ollama
-    rprint("[bold][1/7] Checking Ollama...[/bold]")
-    version = _check_ollama()
-    rprint(f"      [green]\u2713[/green] Ollama found ({version})")
-    model = "nomic-embed-text"
-    _pull_model(model)
+    # Step 1: Ollama — install, start, pull model
+    rprint("[bold][1/5] Setting up Ollama...[/bold]")
+    manager = OllamaManager()
+
+    try:
+        if not manager.is_installed():
+            rprint("      Installing Ollama...")
+            manager.install()
+            rprint("      [green]\u2713[/green] Installed")
+        else:
+            version = manager.get_version()
+            rprint(f"      [green]\u2713[/green] Ollama found ({version})")
+
+        if not manager.is_running():
+            rprint("      Starting Ollama server...")
+            manager.start()
+            rprint("      [green]\u2713[/green] Server started")
+        else:
+            rprint("      [green]\u2713[/green] Server running")
+
+        if not manager.has_model():
+            rprint("      Pulling nomic-embed-text...")
+            manager.pull_model()
+            rprint("      [green]\u2713[/green] Model ready")
+        else:
+            rprint("      [green]\u2713[/green] Model available")
+    except OllamaSetupError as e:
+        rprint(f"      [bold red]Error:[/] {e}")
+        raise typer.Exit(code=1) from None
+
     rprint()
 
-    # Step 2: Create directory structure
-    rprint("[bold][2/7] Creating ~/.loom/ directory structure...[/bold]")
+    # Step 2: Create vault directory structure
+    rprint("[bold][2/5] Creating vault structure...[/bold]")
     vault_path = LOOM_DIR / "vault"
     _create_vault_structure(str(vault_path))
-    rprint(f"      [green]\u2713[/green] {vault_path}/projects/")
-    rprint(f"      [green]\u2713[/green] {vault_path}/knowledge/")
+    rprint(f"      [green]\u2713[/green] {vault_path}/")
+    rprint()
+
+    # Step 3: Initialize SQLite database
+    rprint("[bold][3/5] Initializing database...[/bold]")
     db_path = init_db()
-    rprint(f"      [green]\u2713[/green] {db_path}  (schema initialized)")
+    rprint(f"      [green]\u2713[/green] {db_path}")
     rprint()
 
-    # Step 3: Obsidian CLI vault name
-    rprint("[bold][3/7] Obsidian CLI[/bold]")
-    rprint(
-        "      Ensure the Obsidian CLI is enabled:\n"
-        "      Settings > General > Advanced > Command line interface\n"
-        "      Enter the vault name Loom should target."
-    )
-    vault_name = Prompt.ask("      Vault name", default="loom")
+    # Step 4: Initialize ChromaDB
+    rprint("[bold][4/5] Initializing vector store...[/bold]")
+    chroma_path = LOOM_DIR / "chroma"
+    chroma_path.mkdir(parents=True, exist_ok=True)
+    from loom.retrieval.chroma_store import ChromaStore
+    ChromaStore(persist_path=chroma_path)
+    rprint(f"      [green]\u2713[/green] ChromaDB at {chroma_path}/")
     rprint()
 
-    # Step 4: Pinecone
-    rprint("[bold][4/7] Pinecone[/bold]")
-    pinecone_key = _prompt_api_key("API key")
-    rprint()
+    # Step 5: Save config
+    rprint("[bold][5/5] Saving configuration...[/bold]")
 
-    # Step 5: Anthropic API key (optional)
-    rprint("[bold][5/7] Anthropic API key (optional — for compression feature)[/bold]")
-    rprint("      Press Enter to skip (compression will remain disabled)")
-    anthropic_key = _prompt_api_key("API key", required=False)
-    rprint()
+    obsidian_vault_name = "loom"
+    anthropic_key = ""
 
-    # Step 6: Write config
-    rprint("[bold][6/7] Writing ~/.loom/loom-settings.json...[/bold]")
+    if not non_interactive:
+        rprint("      Optional configuration (press Enter to skip):")
+        rprint()
+        obsidian_vault_name = Prompt.ask(
+            "      Obsidian vault name", default="loom"
+        )
+        rprint()
+        rprint("      [dim]Anthropic API key enables compression (optional)[/dim]")
+        anthropic_key = _prompt_api_key("Anthropic API key", required=False)
+        rprint()
+
     config = LoomConfig(
         vault_path=vault_path,
-        obsidian_vault_name=vault_name,
-        pinecone_api_key=pinecone_key,
+        chroma_path=chroma_path,
+        obsidian_vault_name=obsidian_vault_name,
         compression_enabled=bool(anthropic_key),
         compression_anthropic_key=anthropic_key or None,
     )
     save_config(config)
-    rprint("      [green]\u2713[/green] Config saved")
+    rprint("      [green]\u2713[/green] Config saved to ~/.loom/loom-settings.json")
     rprint()
 
-    # Step 7: Done
-    rprint("[bold][7/7] Done![/bold]")
+    rprint(Panel("[bold green]Setup complete![/bold green] Loom is ready.", expand=False))
+    rprint(f"      Vault: {vault_path}")
+    rprint(f"      Vector store: {chroma_path}")
     rprint("      Run `loom config show` to review settings.")
-    rprint(f"      Next: open Obsidian pointed at {vault_path}")
+    rprint(f"      Optional: point Obsidian at {vault_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +237,6 @@ def buffer_event_cmd() -> None:
     except SystemExit:
         raise
     except Exception:
-        # Never block Claude Code — swallow errors silently
         pass
 
 
@@ -262,7 +265,6 @@ def flush_cmd(
             raise typer.Exit(code=1)
 
         if not repo_path:
-            # Fall back to current working directory
             import os
             repo_path = os.getcwd()
 
@@ -314,7 +316,6 @@ def context_hook_cmd() -> None:
     except SystemExit:
         raise
     except Exception:
-        # Don't block session start
         pass
 
 
@@ -328,10 +329,10 @@ def reindex_cmd(
     force: bool = typer.Option(False, "--force", "-f", help="Re-index all notes regardless of content hash"),
     path: str = typer.Option(None, "--path", "-p", help="Re-index a single vault-relative path"),
 ) -> None:
-    """Incrementally re-index vault notes into Pinecone.
+    """Incrementally re-index vault notes into ChromaDB.
 
     Scans ~/.loom/vault/ for changed files (by content hash), generates
-    embeddings via Ollama, and upserts vectors to Pinecone.
+    embeddings via Ollama, and upserts vectors to ChromaDB.
     """
     try:
         config = load_config()
@@ -352,7 +353,7 @@ def reindex_cmd(
     rprint(f"  {report.total_notes} notes found")
     rprint(f"  {report.new_notes} new, {report.changed_notes} changed, {report.unchanged_notes} unchanged")
     rprint(f"Embedded {report.total_chunks} chunks")
-    rprint(f"Upserted to Pinecone: {report.vectors_upserted} vectors")
+    rprint(f"Upserted {report.vectors_upserted} vectors")
     rprint(f"Deleted {report.deleted_notes} stale notes")
     rprint("[green]Done.[/green]")
 
