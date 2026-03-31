@@ -1,12 +1,13 @@
-"""Entry point for `python -m loom` — starts the MCP server."""
+"""Entry point for `python -m loom` — starts the MCP server via stdio."""
 
-import sys
+import asyncio
+
+from loom.server import server
 
 
 def main() -> None:
-    # MCP server is implemented in F03. For now, print a message and exit.
-    print("Loom MCP server not yet implemented. Use `loom --help` for CLI commands.")
-    sys.exit(0)
+    """Run the Loom MCP server over stdio transport."""
+    asyncio.run(server.run_stdio_async())
 
 
 if __name__ == "__main__":

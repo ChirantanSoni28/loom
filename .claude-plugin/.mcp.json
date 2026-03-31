@@ -1,4 +1,9 @@
 {
-  "_comment": "MCP server configuration — populated in F03",
-  "mcpServers": {}
+  "mcpServers": {
+    "loom": {
+      "command": "python",
+      "args": ["-m", "loom"],
+      "env": {}
+    }
+  }
 }

@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS graph_cache (
     to_path     TEXT NOT NULL,
     PRIMARY KEY (from_path, to_path)
 );
+
+CREATE TABLE IF NOT EXISTS pending_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    tool_name     TEXT NOT NULL,
+    tool_input    TEXT NOT NULL,
+    tool_response TEXT NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

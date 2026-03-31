@@ -1,9 +1,13 @@
 {
   "name": "loom",
   "version": "0.1.0",
-  "description": "Obsidian-backed graph retrieval memory for Claude Code",
+  "description": "Obsidian-backed graph retrieval memory for Claude Code. Automatically captures sessions and retrieves relevant context using hybrid semantic + graph search.",
   "author": "chirantansoni",
   "license": "MIT",
   "homepage": "https://github.com/chirantansoni/loom",
-  "install": "scripts/install.sh"
+  "requirements": {
+    "ollama": ">=0.3.0",
+    "python": ">=3.12"
+  },
+  "post_install": "scripts/install.sh"
 }

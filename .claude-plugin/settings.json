@@ -1,4 +1,25 @@
 {
-  "_comment": "Claude Code hooks configuration — populated in F04",
-  "hooks": {}
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python -m loom context-hook",
+        "timeout": 10000
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "python -m loom buffer-event",
+        "timeout": 2000
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python -m loom flush",
+        "timeout": 30000
+      }
+    ]
+  }
 }

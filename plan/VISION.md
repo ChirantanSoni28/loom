@@ -186,10 +186,10 @@ loom setup    # interactive wizard
 |---|---------|--------|
 | F01 | [Project Scaffold + Setup Wizard](features/F01-scaffold-setup.md) | complete |
 | F02 | [Obsidian Vault Integration](features/F02-obsidian-vault.md) | complete |
-| F03 | [MCP Server Core](features/F03-mcp-server.md) | pending |
-| F04 | [Capture Engine + Hooks](features/F04-capture-hooks.md) | pending |
-| F05 | [Vector Indexing — Pinecone + Ollama](features/F05-vector-indexing.md) | pending |
-| F06 | [Graph Traversal — Wikilink Graph](features/F06-graph-traversal.md) | pending |
-| F07 | [Hybrid Retrieval Engine](features/F07-hybrid-retrieval.md) | pending |
-| F08 | [Compression Scheduler](features/F08-compression.md) | pending |
-| F09 | [Plugin Packaging + Open Source Release](features/F09-packaging.md) | pending |
+| F03 | [MCP Server Core](features/F03-mcp-server.md) | complete |
+| F04 | [Capture Engine + Hooks](features/F04-capture-hooks.md) | complete |
+| F05 | [Vector Indexing — Pinecone + Ollama](features/F05-vector-indexing.md) | complete |
+| F06 | [Graph Traversal — Wikilink Graph](features/F06-graph-traversal.md) | complete |
+| F07 | [Hybrid Retrieval Engine](features/F07-hybrid-retrieval.md) | complete |
+| F08 | [Compression Scheduler](features/F08-compression.md) | complete |
+| F09 | [Plugin Packaging + Open Source Release](features/F09-packaging.md) | complete |
